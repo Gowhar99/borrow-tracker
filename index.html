@@ -695,6 +695,7 @@
     grid.innerHTML = list.map(p => {
       const balance = p.borrowed - p.returned;
       const settled = balance <= 0;
+      const key = p.name.toLowerCase().replace(/'/g, "\\'");
       return `
         <div class="person-card">
           <div class="name">👤 ${p.name}</div>
@@ -704,9 +705,58 @@
           <div class="balance ${settled ? 'settled-text' : 'owing'}">
             ${settled ? '✓ Fully Settled' : 'Still Owe: ' + fmt(balance)}
           </div>
+          <div style="display:flex;gap:8px;margin-top:12px">
+            <button class="btn" style="flex:1;background:#25D366;color:white;font-size:0.82rem;padding:7px" onclick="shareWhatsApp('${key}')">📲 WhatsApp</button>
+            <button class="btn" style="flex:1;background:#e2e8f0;color:#2d3748;font-size:0.82rem;padding:7px" onclick="copyRecord('${key}')">📋 Copy</button>
+          </div>
         </div>
       `;
     }).join('');
+  }
+
+  // ---- Share Record ----
+  function buildShareText(personKey) {
+    const personEntries = entries.filter(e => e.person.toLowerCase() === personKey);
+    if (personEntries.length === 0) return null;
+    const name = personEntries[0].person;
+    const borrowed = personEntries.filter(e => e.type === 'borrow').reduce((s, e) => s + e.amount, 0);
+    const returned = personEntries.filter(e => e.type === 'return').reduce((s, e) => s + e.amount, 0);
+    const balance  = borrowed - returned;
+
+    let text = `💸 *Borrow Record with ${name}*\n`;
+    text += `─────────────────\n`;
+
+    personEntries
+      .slice().sort((a, b) => a.date.localeCompare(b.date))
+      .forEach(e => {
+        const icon = e.type === 'borrow' ? '🔴' : '🟢';
+        const label = e.type === 'borrow' ? 'Borrowed' : 'Returned';
+        text += `${icon} ${fmtDate(e.date)} — ${label} ${fmt(e.amount)}`;
+        if (e.notes) text += ` (${e.notes})`;
+        text += '\n';
+      });
+
+    text += `─────────────────\n`;
+    text += `Total Borrowed: ${fmt(borrowed)}\n`;
+    text += `Total Returned: ${fmt(returned)}\n`;
+    text += balance > 0
+      ? `*Still Owe: ${fmt(balance)}*`
+      : `*✓ Fully Settled*`;
+    return text;
+  }
+
+  function shareWhatsApp(personKey) {
+    const text = buildShareText(personKey);
+    if (!text) return;
+    window.open('https://wa.me/?text=' + encodeURIComponent(text), '_blank');
+  }
+
+  function copyRecord(personKey) {
+    const text = buildShareText(personKey);
+    if (!text) return;
+    navigator.clipboard.writeText(text).then(() => {
+      alert('Record copied to clipboard!');
+    });
   }
 
   function updatePersonDatalist() {
