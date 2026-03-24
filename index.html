@@ -263,8 +263,11 @@
       font-weight: 600;
     }
 
-    .badge-borrow { background: #fed7d7; color: #c53030; }
-    .badge-return { background: #c6f6d5; color: #276749; }
+    .badge-borrow   { background: #fed7d7; color: #c53030; }
+    .badge-return   { background: #c6f6d5; color: #276749; }
+    .badge-lend     { background: #bee3f8; color: #2b6cb0; }
+    .badge-received { background: #e9d8fd; color: #6b46c1; }
+    .badge-salary   { background: #fef3c7; color: #92400e; }
 
     /* Person summary */
     .person-grid {
@@ -383,20 +386,22 @@
     <!-- Summary Cards -->
     <div class="summary-grid">
       <div class="card red">
-        <div class="label">Total Borrowed</div>
+        <div class="label">I Owe</div>
         <div class="amount" id="totalBorrowed">AED 0</div>
+        <div style="font-size:0.75rem;color:#718096;margin-top:4px">Borrowed - Returned</div>
       </div>
       <div class="card green">
-        <div class="label">Total Returned</div>
+        <div class="label">Owed to Me</div>
         <div class="amount" id="totalReturned">AED 0</div>
+        <div style="font-size:0.75rem;color:#718096;margin-top:4px">Lent - Received Back</div>
+      </div>
+      <div class="card" style="background:#fef9c3">
+        <div class="label">Salary This Month</div>
+        <div class="amount" id="salaryThisMonth" style="color:#b45309">AED 0</div>
       </div>
       <div class="card blue">
-        <div class="label">Outstanding Balance</div>
-        <div class="amount" id="outstandingBalance">AED 0</div>
-      </div>
-      <div class="card">
-        <div class="label">Lenders</div>
-        <div class="amount" id="totalLenders" style="color:#2b6cb0">0</div>
+        <div class="label">People</div>
+        <div class="amount" id="totalLenders">0</div>
       </div>
     </div>
 
@@ -414,13 +419,16 @@
         <div class="form-row">
           <div class="form-group">
             <label>Type</label>
-            <select id="txnType">
-              <option value="borrow">Borrowed (I took money)</option>
-              <option value="return">Returned (I paid back)</option>
+            <select id="txnType" onchange="updatePersonLabel()">
+              <option value="borrow">💸 Borrowed (I took money)</option>
+              <option value="return">✅ Returned (I paid back)</option>
+              <option value="lend">🤝 Lent (I gave money)</option>
+              <option value="received">💰 Received Back (they paid me)</option>
+              <option value="salary">👷 Salary Paid (to employee)</option>
             </select>
           </div>
           <div class="form-group">
-            <label>Person Name (Lender)</label>
+            <label id="personLabel">Person Name</label>
             <input type="text" id="personName" placeholder="e.g. Ali, Uncle Ahmad" list="personList" />
             <datalist id="personList"></datalist>
           </div>
@@ -431,6 +439,12 @@
           <div class="form-group">
             <label>Date</label>
             <input type="date" id="txnDate" />
+          </div>
+        </div>
+        <div class="form-row" id="salaryMonthRow" style="display:none">
+          <div class="form-group">
+            <label>Salary Month</label>
+            <input type="month" id="salaryMonth" />
           </div>
         </div>
         <div class="form-row">
@@ -453,6 +467,9 @@
             <option value="">All Types</option>
             <option value="borrow">Borrowed</option>
             <option value="return">Returned</option>
+            <option value="lend">Lent</option>
+            <option value="received">Received Back</option>
+            <option value="salary">Salary Paid</option>
           </select>
           <input type="date" id="filterFrom" onchange="renderHistory()" />
           <span style="font-size:0.85rem;color:#718096">to</span>
@@ -570,6 +587,11 @@
     if (!amount || amount <= 0) return alert('Please enter a valid amount.');
     if (!date) return alert('Please select a date.');
 
+    const salaryMonthVal = document.getElementById('salaryMonth').value;
+    const finalNotes = (type === 'salary' && salaryMonthVal)
+      ? (notes ? `${salaryMonthVal} — ${notes}` : salaryMonthVal)
+      : notes;
+
     const btn = document.getElementById('saveBtn');
     btn.disabled = true;
     btn.innerHTML = '<span class="spinner"></span> Saving...';
@@ -577,11 +599,12 @@
 
     try {
       await db.collection('users').doc(currentUser.uid)
-              .collection('entries').add({ type, person, amount, date, notes, createdAt: Date.now() });
+              .collection('entries').add({ type, person, amount, date, notes: finalNotes, createdAt: Date.now() });
 
       document.getElementById('personName').value = '';
       document.getElementById('amount').value = '';
       document.getElementById('notes').value = '';
+      document.getElementById('salaryMonth').value = '';
       document.getElementById('txnDate').valueAsDate = new Date();
       switchTab('history');
     } catch (err) {
@@ -635,15 +658,26 @@
   }
 
   function updateSummary() {
-    const borrowed    = entries.filter(e => e.type === 'borrow').reduce((s, e) => s + e.amount, 0);
-    const returned    = entries.filter(e => e.type === 'return').reduce((s, e) => s + e.amount, 0);
-    const outstanding = Math.max(0, borrowed - returned);
-    const lenders     = new Set(entries.map(e => e.person.toLowerCase())).size;
+    const iOwe     = Math.max(0,
+      entries.filter(e => e.type === 'borrow').reduce((s, e) => s + e.amount, 0) -
+      entries.filter(e => e.type === 'return').reduce((s, e) => s + e.amount, 0)
+    );
+    const owedToMe = Math.max(0,
+      entries.filter(e => e.type === 'lend').reduce((s, e) => s + e.amount, 0) -
+      entries.filter(e => e.type === 'received').reduce((s, e) => s + e.amount, 0)
+    );
+    const now = new Date();
+    const salaryMonth = entries.filter(e => {
+      if (e.type !== 'salary') return false;
+      const d = new Date(e.date + 'T00:00:00');
+      return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
+    }).reduce((s, e) => s + e.amount, 0);
+    const people = new Set(entries.map(e => e.person.toLowerCase())).size;
 
-    document.getElementById('totalBorrowed').textContent    = fmt(borrowed);
-    document.getElementById('totalReturned').textContent    = fmt(returned);
-    document.getElementById('outstandingBalance').textContent = fmt(outstanding);
-    document.getElementById('totalLenders').textContent     = lenders;
+    document.getElementById('totalBorrowed').textContent   = fmt(iOwe);
+    document.getElementById('totalReturned').textContent   = fmt(owedToMe);
+    document.getElementById('salaryThisMonth').textContent = fmt(salaryMonth);
+    document.getElementById('totalLenders').textContent    = people;
   }
 
   function renderHistory() {
@@ -668,29 +702,40 @@
       return;
     }
 
-    tbody.innerHTML = filtered.map(e => `
-      <tr>
-        <td>${fmtDate(e.date)}</td>
-        <td><strong>${e.person}</strong></td>
-        <td><span class="badge ${e.type === 'borrow' ? 'badge-borrow' : 'badge-return'}">${e.type === 'borrow' ? 'Borrowed' : 'Returned'}</span></td>
-        <td><strong>${fmt(e.amount)}</strong></td>
-        <td style="color:#718096;max-width:200px">${e.notes || '-'}</td>
-        <td><button class="btn btn-danger" onclick="deleteEntry('${e.id}')">Delete</button></td>
-      </tr>
-    `).join('');
+    const badgeMap = {
+      borrow:   ['badge-borrow',   '💸 Borrowed'],
+      return:   ['badge-return',   '✅ Returned'],
+      lend:     ['badge-lend',     '🤝 Lent'],
+      received: ['badge-received', '💰 Received Back'],
+      salary:   ['badge-salary',   '👷 Salary'],
+    };
+
+    tbody.innerHTML = filtered.map(e => {
+      const [cls, label] = badgeMap[e.type] || ['badge-borrow', e.type];
+      return `
+        <tr>
+          <td>${fmtDate(e.date)}</td>
+          <td><strong>${e.person}</strong></td>
+          <td><span class="badge ${cls}">${label}</span></td>
+          <td><strong>${fmt(e.amount)}</strong></td>
+          <td style="color:#718096;max-width:200px">${e.notes || '-'}</td>
+          <td><button class="btn btn-danger" onclick="deleteEntry('${e.id}')">Delete</button></td>
+        </tr>
+      `;
+    }).join('');
   }
 
   function renderPeople() {
     const people = {};
     entries.forEach(e => {
       const key = e.person.toLowerCase();
-      if (!people[key]) people[key] = { name: e.person, borrowed: 0, returned: 0, lastDate: '' };
-      if (e.type === 'borrow') people[key].borrowed += e.amount;
-      else people[key].returned += e.amount;
-      if (e.date > people[key].lastDate) {
-        people[key].lastDate = e.date;
-        people[key].name = e.person;
-      }
+      if (!people[key]) people[key] = { name: e.person, borrowed: 0, returned: 0, lent: 0, received: 0, salary: 0, lastDate: '' };
+      if (e.type === 'borrow')   people[key].borrowed += e.amount;
+      if (e.type === 'return')   people[key].returned += e.amount;
+      if (e.type === 'lend')     people[key].lent     += e.amount;
+      if (e.type === 'received') people[key].received += e.amount;
+      if (e.type === 'salary')   people[key].salary   += e.amount;
+      if (e.date > people[key].lastDate) { people[key].lastDate = e.date; people[key].name = e.person; }
     });
 
     const grid = document.getElementById('personGrid');
@@ -702,18 +747,34 @@
     }
 
     grid.innerHTML = list.map(p => {
-      const balance = p.borrowed - p.returned;
-      const settled = balance <= 0;
+      const iOweThem  = Math.max(0, p.borrowed - p.returned);
+      const theyOweMe = Math.max(0, p.lent - p.received);
       const key = p.name.toLowerCase().replace(/'/g, "\\'");
+
+      let rows = '';
+      if (p.borrowed || p.returned) {
+        rows += `<div class="detail"><span>I Borrowed</span><strong style="color:#e53e3e">${fmt(p.borrowed)}</strong></div>`;
+        rows += `<div class="detail"><span>I Returned</span><strong style="color:#38a169">${fmt(p.returned)}</strong></div>`;
+        rows += `<div class="balance ${iOweThem > 0 ? 'owing' : 'settled-text'}" style="margin-bottom:8px">
+          ${iOweThem > 0 ? '↑ I still owe: ' + fmt(iOweThem) : '✓ Fully settled (borrowed)'}
+        </div>`;
+      }
+      if (p.lent || p.received) {
+        rows += `<div class="detail"><span>I Lent</span><strong style="color:#2b6cb0">${fmt(p.lent)}</strong></div>`;
+        rows += `<div class="detail"><span>Received Back</span><strong style="color:#38a169">${fmt(p.received)}</strong></div>`;
+        rows += `<div class="balance ${theyOweMe > 0 ? 'owing' : 'settled-text'}" style="margin-bottom:8px">
+          ${theyOweMe > 0 ? '↓ They still owe: ' + fmt(theyOweMe) : '✓ Fully settled (lent)'}
+        </div>`;
+      }
+      if (p.salary) {
+        rows += `<div class="detail"><span>💼 Salary Paid</span><strong style="color:#b45309">${fmt(p.salary)}</strong></div>`;
+      }
+
       return `
         <div class="person-card">
           <div class="name">👤 ${p.name}</div>
-          <div class="detail"><span>Borrowed</span><strong style="color:#e53e3e">${fmt(p.borrowed)}</strong></div>
-          <div class="detail"><span>Returned</span><strong style="color:#38a169">${fmt(p.returned)}</strong></div>
-          <div class="detail"><span>Last transaction</span><span>${fmtDate(p.lastDate)}</span></div>
-          <div class="balance ${settled ? 'settled-text' : 'owing'}">
-            ${settled ? '✓ Fully Settled' : 'Still Owe: ' + fmt(balance)}
-          </div>
+          ${rows}
+          <div class="detail" style="margin-top:8px"><span>Last transaction</span><span>${fmtDate(p.lastDate)}</span></div>
           <div style="display:flex;gap:8px;margin-top:12px">
             <button class="btn" style="flex:1;background:#25D366;color:white;font-size:0.82rem;padding:7px" onclick="shareWhatsApp('${key}')">📲 WhatsApp</button>
             <button class="btn" style="flex:1;background:#e2e8f0;color:#2d3748;font-size:0.82rem;padding:7px" onclick="copyRecord('${key}')">📋 Copy</button>
@@ -728,30 +789,41 @@
     const personEntries = entries.filter(e => e.person.toLowerCase() === personKey);
     if (personEntries.length === 0) return null;
     const name = personEntries[0].person;
-    const borrowed = personEntries.filter(e => e.type === 'borrow').reduce((s, e) => s + e.amount, 0);
-    const returned = personEntries.filter(e => e.type === 'return').reduce((s, e) => s + e.amount, 0);
-    const balance  = borrowed - returned;
 
-    let text = `💸 *Borrow Record with ${name}*\n`;
-    text += `─────────────────\n`;
+    const typeIcon  = { borrow: '🔴', return: '🟢', lend: '🔵', received: '💰', salary: '👷' };
+    const typeLabel = { borrow: 'Borrowed', return: 'Returned', lend: 'Lent', received: 'Received Back', salary: 'Salary Paid' };
 
-    personEntries
-      .slice().sort((a, b) => a.date.localeCompare(b.date))
-      .forEach(e => {
-        const icon = e.type === 'borrow' ? '🔴' : '🟢';
-        const label = e.type === 'borrow' ? 'Borrowed' : 'Returned';
-        text += `${icon} ${fmtDate(e.date)} — ${label} ${fmt(e.amount)}`;
-        if (e.notes) text += ` (${e.notes})`;
-        text += '\n';
-      });
+    let text = `📋 *Record with ${name}*\n─────────────────\n`;
+
+    personEntries.slice().sort((a, b) => a.date.localeCompare(b.date)).forEach(e => {
+      text += `${typeIcon[e.type] || '•'} ${fmtDate(e.date)} — ${typeLabel[e.type] || e.type} ${fmt(e.amount)}`;
+      if (e.notes) text += ` (${e.notes})`;
+      text += '\n';
+    });
 
     text += `─────────────────\n`;
-    text += `Total Borrowed: ${fmt(borrowed)}\n`;
-    text += `Total Returned: ${fmt(returned)}\n`;
-    text += balance > 0
-      ? `*Still Owe: ${fmt(balance)}*`
-      : `*✓ Fully Settled*`;
-    return text;
+
+    const borrowed  = personEntries.filter(e => e.type === 'borrow').reduce((s, e) => s + e.amount, 0);
+    const returned  = personEntries.filter(e => e.type === 'return').reduce((s, e) => s + e.amount, 0);
+    const lent      = personEntries.filter(e => e.type === 'lend').reduce((s, e) => s + e.amount, 0);
+    const received  = personEntries.filter(e => e.type === 'received').reduce((s, e) => s + e.amount, 0);
+    const salary    = personEntries.filter(e => e.type === 'salary').reduce((s, e) => s + e.amount, 0);
+
+    if (borrowed || returned) {
+      const bal = borrowed - returned;
+      text += `Borrowed: ${fmt(borrowed)} | Returned: ${fmt(returned)}\n`;
+      text += bal > 0 ? `*I still owe: ${fmt(bal)}*\n` : `*✓ Borrowing settled*\n`;
+    }
+    if (lent || received) {
+      const bal = lent - received;
+      text += `Lent: ${fmt(lent)} | Received Back: ${fmt(received)}\n`;
+      text += bal > 0 ? `*They still owe: ${fmt(bal)}*\n` : `*✓ Lending settled*\n`;
+    }
+    if (salary) {
+      text += `Salary Paid Total: ${fmt(salary)}\n`;
+    }
+
+    return text.trim();
   }
 
   function shareWhatsApp(personKey) {
@@ -771,6 +843,16 @@
   function updatePersonDatalist() {
     const names = [...new Set(entries.map(e => e.person))];
     document.getElementById('personList').innerHTML = names.map(n => `<option value="${n}">`).join('');
+  }
+
+  // ---- Person label + salary month toggle ----
+  function updatePersonLabel() {
+    const type = document.getElementById('txnType').value;
+    const label = document.getElementById('personLabel');
+    const salaryRow = document.getElementById('salaryMonthRow');
+    const labels = { borrow: 'Person Name (Lender)', return: 'Person Name (Lender)', lend: 'Person Name (Borrower)', received: 'Person Name (Borrower)', salary: 'Employee Name' };
+    label.textContent = labels[type] || 'Person Name';
+    salaryRow.style.display = type === 'salary' ? '' : 'none';
   }
 
   // ---- Notifications ----
@@ -798,13 +880,23 @@
     if (localStorage.getItem(NOTIF_DATE_KEY) === today) return;
     localStorage.setItem(NOTIF_DATE_KEY, today);
 
-    const borrowed  = entries.filter(e => e.type === 'borrow').reduce((s, e) => s + e.amount, 0);
-    const returned  = entries.filter(e => e.type === 'return').reduce((s, e) => s + e.amount, 0);
-    const balance   = borrowed - returned;
+    const iOwe = Math.max(0,
+      entries.filter(e => e.type === 'borrow').reduce((s, e) => s + e.amount, 0) -
+      entries.filter(e => e.type === 'return').reduce((s, e) => s + e.amount, 0)
+    );
+    const owedToMe = Math.max(0,
+      entries.filter(e => e.type === 'lend').reduce((s, e) => s + e.amount, 0) -
+      entries.filter(e => e.type === 'received').reduce((s, e) => s + e.amount, 0)
+    );
 
-    if (balance > 0) {
-      new Notification('💸 Borrow Tracker Reminder', {
-        body: `You still owe AED ${Number(balance).toLocaleString('en-AE')}. Don't forget to pay it back!`,
+    if (iOwe > 0) {
+      new Notification('💸 Borrow Tracker — You Owe', {
+        body: `You still owe AED ${Number(iOwe).toLocaleString('en-AE')}. Don't forget to pay it back!`,
+      });
+    }
+    if (owedToMe > 0) {
+      new Notification('💰 Borrow Tracker — Owed to You', {
+        body: `AED ${Number(owedToMe).toLocaleString('en-AE')} is still owed to you. Consider following up.`,
       });
     }
   }
