@@ -67,6 +67,7 @@
 
     /* ---- App ---- */
     #app { display: none; }
+    #notifBanner { display: none; }
 
     header {
       background: #2b6cb0;
@@ -373,6 +374,12 @@
 
   <div class="container">
 
+    <!-- Notification Banner -->
+    <div id="notifBanner" style="background:#ebf8ff;border:1.5px solid #90cdf4;border-radius:10px;padding:12px 16px;margin-bottom:18px;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+      <span style="font-size:0.9rem;color:#2b6cb0;">🔔 Enable notifications to get daily reminders about your outstanding balance.</span>
+      <button onclick="requestNotificationPermission()" style="background:#2b6cb0;color:white;border:none;border-radius:7px;padding:7px 16px;font-size:0.85rem;font-weight:600;cursor:pointer;">Enable Notifications</button>
+    </div>
+
     <!-- Summary Cards -->
     <div class="summary-grid">
       <div class="card red">
@@ -623,6 +630,8 @@
     renderHistory();
     renderPeople();
     updatePersonDatalist();
+    checkAndNotify();
+    updateNotifBanner();
   }
 
   function updateSummary() {
@@ -762,6 +771,52 @@
   function updatePersonDatalist() {
     const names = [...new Set(entries.map(e => e.person))];
     document.getElementById('personList').innerHTML = names.map(n => `<option value="${n}">`).join('');
+  }
+
+  // ---- Notifications ----
+  const NOTIF_DATE_KEY = 'borrow_notif_last_date';
+
+  async function requestNotificationPermission() {
+    if (!('Notification' in window)) {
+      alert('Your browser does not support notifications.');
+      return;
+    }
+    const perm = await Notification.requestPermission();
+    if (perm === 'granted') {
+      new Notification('🔔 Notifications Enabled', {
+        body: 'You will now get daily reminders about your outstanding balance.',
+      });
+      document.getElementById('notifBanner').style.display = 'none';
+    } else {
+      alert('Notifications blocked. Please enable them in your browser settings.');
+    }
+  }
+
+  function checkAndNotify() {
+    if (!('Notification' in window) || Notification.permission !== 'granted') return;
+    const today = new Date().toDateString();
+    if (localStorage.getItem(NOTIF_DATE_KEY) === today) return;
+    localStorage.setItem(NOTIF_DATE_KEY, today);
+
+    const borrowed  = entries.filter(e => e.type === 'borrow').reduce((s, e) => s + e.amount, 0);
+    const returned  = entries.filter(e => e.type === 'return').reduce((s, e) => s + e.amount, 0);
+    const balance   = borrowed - returned;
+
+    if (balance > 0) {
+      new Notification('💸 Borrow Tracker Reminder', {
+        body: `You still owe AED ${Number(balance).toLocaleString('en-AE')}. Don't forget to pay it back!`,
+      });
+    }
+  }
+
+  function updateNotifBanner() {
+    const banner = document.getElementById('notifBanner');
+    if (!banner) return;
+    if (!('Notification' in window) || Notification.permission === 'granted') {
+      banner.style.display = 'none';
+    } else {
+      banner.style.display = 'flex';
+    }
   }
 
   // ---- Tabs ----
